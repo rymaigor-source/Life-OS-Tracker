@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Life OS</title>
+
+<!-- Официальный SDK Telegram Mini Apps (даёт объект window.Telegram.WebApp) -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+<style>
+  /* ==========================================================================
+     Цвета: берём из темы Telegram (--tg-theme-*), а если приложение открыто
+     вне Telegram — используем тёмные значения по умолчанию.
+     ========================================================================== */
+  :root {
+    --bg:        var(--tg-theme-bg-color, #17212b);
+    --bg-2:      var(--tg-theme-secondary-bg-color, #0e1621);
+    --text:      var(--tg-theme-text-color, #f5f5f5);
+    --hint:      var(--tg-theme-hint-color, #708499);
+    --link:      var(--tg-theme-link-color, #6ab3f3);
+    --accent:    var(--tg-theme-button-color, #5288c1);
+    --accent-tx: var(--tg-theme-button-text-color, #ffffff);
+    --border:    rgba(255, 255, 255, 0.08);
+    --green:     #4fcf70;
+    --red:       #ec6565;
+    --radius:    14px;
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    margin: 0;
+    background: var(--bg-2);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .app {
+    max-width: 560px;
+    margin: 0 auto;
+    min-height: 100vh;
+    padding: 16px 16px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  header { padding: 4px 4px 14px; }
+  header h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
+  header p  { margin: 4px 0 0; color: var(--hint); font-size: 14px; }
+
+  /* ---------- Вкладки (сегментированный переключатель) ---------- */
+  .tabs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+    padding: 4px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+  }
+  .tab {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--hint);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 10px 6px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background .2s, color .2s;
+  }
+  .tab.active { background: var(--accent); color: var(--accent-tx); }
+
+  .panel { display: none; animation: fade .25s ease; }
+  .panel.active { display: block; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  /* ---------- Карточки и поля ---------- */
+  .card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+  .label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .6px;
+    color: var(--hint);
+    margin: 0 0 8px;
+  }
+  .field + .field { margin-top: 16px; }
+
+  input[type="number"],
+  input[type="text"],
+  input[type="datetime-local"] {
+    width: 100%;
+    background: var(--bg-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 13px 14px;
+    font: inherit;
+    outline: none;
+    transition: border-color .2s;
+    color-scheme: dark;
+  }
+  input:focus { border-color: var(--accent); }
+  input::placeholder { color: var(--hint); opacity: .7; }
+
+  /* Крупное поле суммы */
+  .amount-wrap { position: relative; }
+  .amount-wrap input { font-size: 28px; font-weight: 700; padding-right: 48px; }
+  .amount-wrap span {
+    position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+    color: var(--hint); font-size: 22px; font-weight: 600;
+  }
+
+  /* ---------- Переключатель Расход / Доход ---------- */
+  .switch { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .switch button {
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--bg-2);
+    color: var(--hint);
+    font: inherit; font-weight: 600;
+    padding: 12px;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .switch button.active[data-kind="expense"] { background: rgba(236,101,101,.15); border-color: var(--red);   color: var(--red); }
+  .switch button.active[data-kind="income"]  { background: rgba(79,207,112,.15);  border-color: var(--green); color: var(--green); }
+
+  /* ---------- Чипы (категории, быстрые варианты времени) ---------- */
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    appearance: none;
+    border: 1px solid var(--border);
+    background: var(--bg-2);
+    color: var(--text);
+    font: inherit; font-size: 14px;
+    padding: 10px 14px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all .2s;
+  }
+  .chip.active { background: var(--accent); border-color: var(--accent); color: var(--accent-tx); }
+
+  /* ---------- Главная кнопка действия ---------- */
+  .btn {
+    appearance: none;
+    width: 100%;
+    border: 0;
+    background: var(--accent);
+    color: var(--accent-tx);
+    font: inherit; font-size: 16px; font-weight: 700;
+    padding: 15px;
+    border-radius: 14px;
+    cursor: pointer;
+    transition: transform .1s, opacity .2s;
+  }
+  .btn:active { transform: scale(.98); opacity: .9; }
+
+  /* ---------- Привычки ---------- */
+  .habit {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 12px 12px 14px;
+    margin-bottom: 10px;
+  }
+  .habit .emoji {
+    width: 42px; height: 42px; flex: none;
+    display: grid; place-items: center;
+    background: var(--bg-2);
+    border-radius: 12px;
+    font-size: 22px;
+  }
+  .habit .info { flex: 1; min-width: 0; }
+  .habit .info b { display: block; font-size: 15px; }
+  .habit .info small { color: var(--hint); font-size: 13px; }
+  .habit button {
+    appearance: none; flex: none;
+    border: 0;
+    background: rgba(79,207,112,.15);
+    color: var(--green);
+    font: inherit; font-weight: 700; font-size: 14px;
+    padding: 10px 16px;
+    border-radius: 10px;
+    cursor: pointer;
+  }
+  .habit button:active { transform: scale(.96); }
+
+  .hint { color: var(--hint); font-size: 13px; line-height: 1.4; margin: 4px 4px 0; }
+
+  /* ---------- Всплывающее уведомление ---------- */
+  .toast {
+    position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom));
+    transform: translate(-50%, 20px);
+    background: #2b3a4a; color: #fff;
+    padding: 12px 18px; border-radius: 12px;
+    font-size: 14px; opacity: 0; pointer-events: none;
+    transition: all .25s; max-width: 90%; text-align: center; z-index: 10;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+</style>
+</head>
+
+<body>
+<div class="app">
+
+  <header>
+    <h1>🧭 Life OS</h1>
+    <p id="greeting">Финансы, привычки и задачи в одном месте</p>
+  </header>
+
+  <!-- Навигация по вкладкам -->
+  <nav class="tabs">
+    <button class="tab active" data-tab="finance">💰 Финансы</button>
+    <button class="tab" data-tab="habits">✅ Привычки</button>
+    <button class="tab" data-tab="tasks">📝 Задачи</button>
+  </nav>
+
+  <!-- ===================== ВКЛАДКА: ФИНАНСЫ ===================== -->
+  <section class="panel active" id="panel-finance">
+    <div class="card">
+      <div class="field">
+        <span class="label">Тип операции</span>
+        <div class="switch" id="kindSwitch">
+          <button data-kind="expense" class="active">− Расход</button>
+          <button data-kind="income">+ Доход</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="label" for="amount">Сумма</label>
+        <div class="amount-wrap">
+          <input id="amount" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0">
+          <span>₽</span>
+        </div>
+      </div>
+
+      <div class="field">
+        <span class="label">Категория</span>
+        <div class="chips" id="categories">
+          <button class="chip active" data-cat="food">🍔 Еда</button>
+          <button class="chip" data-cat="transport">🚌 Транспорт</button>
+          <button class="chip" data-cat="home">🏠 Дом</button>
+          <button class="chip" data-cat="salary">💼 Зарплата</button>
+        </div>
+      </div>
+    </div>
+
+    <button class="btn" id="sendFinance">Записать операцию</button>
+  </section>
+
+  <!-- ===================== ВКЛАДКА: ПРИВЫЧКИ ===================== -->
+  <section class="panel" id="panel-habits">
+    <div id="habitList"></div>
+    <p class="hint">Нажмите «Готово» — отметка уйдёт в бота, а приложение закроется (так работает sendData в Telegram).</p>
+  </section>
+
+  <!-- ===================== ВКЛАДКА: ЗАДАЧИ ===================== -->
+  <section class="panel" id="panel-tasks">
+    <div class="card">
+      <div class="field">
+        <label class="label" for="taskText">Что нужно сделать?</label>
+        <input id="taskText" type="text" maxlength="200" placeholder="Например, позвонить маме">
+      </div>
+
+      <div class="field">
+        <span class="label">Быстрое напоминание</span>
+        <div class="chips" id="quickTimes">
+          <button class="chip" data-min="15">Через 15 мин</button>
+          <button class="chip" data-min="60">Через час</button>
+          <button class="chip" data-min="180">Через 3 часа</button>
+          <button class="chip" data-tomorrow="1">Завтра 9:00</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="label" for="remindAt">Или выберите дату и время</label>
+        <input id="remindAt" type="datetime-local">
+      </div>
+    </div>
+
+    <button class="btn" id="sendTask">Создать задачу</button>
+    <p class="hint">Время можно не указывать — тогда задача создастся без напоминания.</p>
+  </section>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  // ==========================================================================
+  // Инициализация Telegram WebApp
+  // ==========================================================================
+  const tg = window.Telegram && window.Telegram.WebApp;
+  // Приложение реально открыто внутри Telegram, если есть initData
+  const inTelegram = !!(tg && tg.initData);
+
+  if (tg) {
+    tg.ready();                 // сообщаем Telegram, что интерфейс загружен
+    tg.expand();                // раскрываем на всю высоту
+    try {                       // красим шапку/фон под тёмную тему
+      tg.setHeaderColor("bg_color");
+      tg.setBackgroundColor("secondary_bg_color");
+    } catch (e) { /* старые версии клиента могут не поддерживать */ }
+
+    const user = tg.initDataUnsafe && tg.initDataUnsafe.user;
+    if (user && user.first_name) {
+      document.getElementById("greeting").textContent = "Привет, " + user.first_name + "! 👋";
+    }
+  }
+
+  // ==========================================================================
+  // Утилиты
+  // ==========================================================================
+  const $  = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+
+  /** Короткое всплывающее сообщение внизу экрана */
+  let toastTimer;
+  function toast(text) {
+    const el = $("#toast");
+    el.textContent = text;
+    el.classList.add("show");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove("show"), 2200);
+  }
+
+  /** Тактильная отдача (вибрация) — если поддерживается клиентом */
+  function haptic(type) {
+    try {
+      if (type === "success" || type === "error" || type === "warning") {
+        tg.HapticFeedback.notificationOccurred(type);
+      } else {
+        tg.HapticFeedback.selectionChanged();
+      }
+    } catch (e) {}
+  }
+
+  /**
+   * Отправка данных боту. После sendData Telegram сам закроет Mini App.
+   * Вне Telegram (в обычном браузере) просто показываем payload в консоли.
+   */
+  function sendToBot(payload) {
+    const json = JSON.stringify(payload);
+    if (inTelegram) {
+      tg.sendData(json);
+    } else {
+      console.log("[Life OS] sendData (вне Telegram):", json);
+      toast("Открыто вне Telegram — данные в консоли");
+    }
+  }
+
+  // ==========================================================================
+  // Переключение вкладок
+  // ==========================================================================
+  $$(".tab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      $$(".tab").forEach(b => b.classList.toggle("active", b === btn));
+      $$(".panel").forEach(p => p.classList.toggle("active", p.id === "panel-" + btn.dataset.tab));
+      haptic("select");
+    });
+  });
+
+  // ==========================================================================
+  // ФИНАНСЫ
+  // ==========================================================================
+  let kind = "expense";   // текущий тип: expense | income
+  let category = "food";  // текущая категория
+
+  function setCategory(cat) {
+    category = cat;
+    $$("#categories .chip").forEach(c => c.classList.toggle("active", c.dataset.cat === cat));
+  }
+
+  // Выбор типа операции
+  $$("#kindSwitch button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      kind = btn.dataset.kind;
+      $$("#kindSwitch button").forEach(b => b.classList.toggle("active", b === btn));
+      // Удобство: для дохода по умолчанию «Зарплата», для расхода — «Еда»
+      setCategory(kind === "income" ? "salary" : "food");
+      haptic("select");
+    });
+  });
+
+  // Выбор категории
+  $$("#categories .chip").forEach(chip => {
+    chip.addEventListener("click", () => { setCategory(chip.dataset.cat); haptic("select"); });
+  });
+
+  // Отправка финансовой операции
+  $("#sendFinance").addEventListener("click", () => {
+    const amount = parseFloat($("#amount").value.replace(",", "."));
+    if (!isFinite(amount) || amount <= 0) {
+      haptic("error");
+      toast("Введите сумму больше нуля");
+      $("#amount").focus();
+      return;
+    }
+    haptic("success");
+    sendToBot({ type: "finance", kind, amount, category });
+  });
+
+  // ==========================================================================
+  // ПРИВЫЧКИ
+  // ==========================================================================
+  const HABITS = [
+    { id: "water",    emoji: "💧", name: "Выпить воду",       hint: "Стакан воды утром" },
+    { id: "workout",  emoji: "🏃", name: "Зарядка",           hint: "10 минут движения" },
+    { id: "reading",  emoji: "📚", name: "Чтение",            hint: "20 минут книги" },
+    { id: "meditate", emoji: "🧘", name: "Медитация",         hint: "5 минут тишины" },
+    { id: "sleep",    emoji: "😴", name: "Сон до 23:00",      hint: "Лечь вовремя" },
+  ];
+
+  const habitList = $("#habitList");
+  HABITS.forEach(h => {
+    const row = document.createElement("div");
+    row.className = "habit";
+    row.innerHTML =
+      '<div class="emoji"></div>' +
+      '<div class="info"><b></b><small></small></div>' +
+      '<button type="button">Готово</button>';
+    $(".emoji", row).textContent = h.emoji;
+    $("b", row).textContent = h.name;
+    $("small", row).textContent = h.hint;
+    $("button", row).addEventListener("click", () => {
+      haptic("success");
+      sendToBot({ type: "habit", habit_id: h.id, name: h.emoji + " " + h.name });
+    });
+    habitList.appendChild(row);
+  });
+
+  // ==========================================================================
+  // ЗАДАЧИ
+  // ==========================================================================
+  const remindInput = $("#remindAt");
+
+  /** Преобразует Date в строку для <input type="datetime-local"> (локальное время) */
+  function toLocalInput(d) {
+    const pad = n => String(n).padStart(2, "0");
+    return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+           "T" + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+
+  /** Человекочитаемая подпись времени: «17.11, 09:00» */
+  function formatLabel(d) {
+    const pad = n => String(n).padStart(2, "0");
+    return pad(d.getDate()) + "." + pad(d.getMonth() + 1) + ", " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+  }
+
+  // Нельзя выбрать время в прошлом
+  remindInput.min = toLocalInput(new Date());
+
+  // Быстрые варианты времени
+  $$("#quickTimes .chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const d = new Date();
+      if (chip.dataset.tomorrow) {
+        d.setDate(d.getDate() + 1);
+        d.setHours(9, 0, 0, 0);
+      } else {
+        d.setMinutes(d.getMinutes() + Number(chip.dataset.min));
+      }
+      remindInput.value = toLocalInput(d);
+      $$("#quickTimes .chip").forEach(c => c.classList.toggle("active", c === chip));
+      haptic("select");
+    });
+  });
+
+  // Ручной выбор времени снимает подсветку с быстрых кнопок
+  remindInput.addEventListener("input", () => {
+    $$("#quickTimes .chip").forEach(c => c.classList.remove("active"));
+  });
+
+  // Отправка задачи
+  $("#sendTask").addEventListener("click", () => {
+    const text = $("#taskText").value.trim();
+    if (!text) {
+      haptic("error");
+      toast("Введите текст задачи");
+      $("#taskText").focus();
+      return;
+    }
+
+    let remind_at = null;      // время в UTC (ISO) — бот по нему считает задержку
+    let remind_label = null;   // красивая подпись в локальном времени пользователя
+
+    if (remindInput.value) {
+      const when = new Date(remindInput.value);   // трактуется как локальное время
+      if (when.getTime() <= Date.now()) {
+        haptic("error");
+        toast("Время напоминания уже прошло");
+        return;
+      }
+      remind_at = when.toISOString();
+      remind_label = formatLabel(when);
+    }
+
+    haptic("success");
+    sendToBot({ type: "task", text, remind_at, remind_label });
+  });
+</script>
+</body>
+</html>
